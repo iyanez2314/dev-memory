@@ -1,0 +1,139 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/// Company model – represents an organization as provided by Clerk.
+/// Only the Clerk Organization ID (and createdAt) is stored.
+model Company {
+  id        String   @id
+  createdAt DateTime @default(now())
+
+  // Relations
+  users          User[]
+  repositories   Repository[]
+  meetingUploads MeetingUpload[]
+  decisions      Decision[]
+  searchQueries  SearchQuery[]
+  pullRequests   PullRequest[]
+}
+
+/// User model – represents a user with their Clerk User ID.
+/// Only the minimal info is stored (Clerk user ID and organization ID).
+model User {
+  id        String   @id // Clerk User ID
+  companyId String? // Optional Clerk Organization ID
+  company   Company? @relation(fields: [companyId], references: [id])
+  createdAt DateTime @default(now())
+
+  // Domain-specific fields
+  githubToken String?
+
+  // Relations
+  meetingUploads MeetingUpload[]
+  decisions      Decision[]
+  searchQueries  SearchQuery[]
+}
+
+/// Repository model – represents GitHub repositories belonging to a company.
+model Repository {
+  id           String        @id @default(cuid())
+  companyId    String
+  company      Company       @relation(fields: [companyId], references: [id])
+  name         String
+  owner        String
+  githubRepoId String
+  createdAt    DateTime      @default(now())
+  pullRequests PullRequest[]
+}
+
+/// PullRequest model – represents GitHub pull requests linked to repositories.
+model PullRequest {
+  id           String     @id @default(cuid())
+  repoId       String
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id])
+  repository   Repository @relation(fields: [repoId], references: [id])
+  githubId     String // GitHub PR ID
+  title        String
+  description  String?
+  author       String
+  url          String
+  createdAt    DateTime   @default(now())
+  mergedAt     DateTime?
+  filesChanged Json // Store list of changed files as JSON
+  // Implicit many-to-many relation with Decision.
+  decisions    Decision[]
+}
+
+/// MeetingUpload model – represents an uploaded meeting audio file.
+model MeetingUpload {
+  id               String        @id @default(cuid())
+  companyId        String
+  company          Company       @relation(fields: [companyId], references: [id])
+  uploadedBy       String // Clerk User ID of the uploader
+  fileUrl          String
+  originalFileName String
+  uploadedAt       DateTime      @default(now())
+  status           MeetingStatus
+
+  // One-to-one relation with Decision.
+  // MeetingUpload is the owner; decisionId is unique.
+  decisionId String?   @unique
+  decision   Decision? @relation("MeetingDecision", fields: [decisionId], references: [id])
+
+  // Relation to the uploader User (optional)
+  userId   String?
+  uploader User?   @relation(fields: [userId], references: [id])
+}
+
+/// Enum for meeting upload status.
+enum MeetingStatus {
+  processing
+  complete
+  failed
+}
+
+/// Decision model – stores AI-generated or manually entered decisions.
+model Decision {
+  id        String         @id @default(cuid())
+  companyId String
+  company   Company        @relation(fields: [companyId], references: [id])
+  // The one-to-one relation to MeetingUpload is defined by MeetingUpload,
+  // so here we simply declare the relation without specifying fields.
+  meeting   MeetingUpload? @relation("MeetingDecision")
+
+  title       String
+  reasoning   String
+  summary     String
+  actionItems Json? // Optional: store an array of action items as JSON
+  createdAt   DateTime @default(now())
+  createdBy   String // Clerk User ID who created this decision
+
+  // Implicit many-to-many relation with PullRequest.
+  pullRequests PullRequest[]
+  User         User?         @relation(fields: [userId], references: [id])
+  userId       String?
+}
+
+/// SearchQuery model – stores user search queries for analytics or auditing.
+model SearchQuery {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  query     String
+  createdAt DateTime @default(now())
+}
